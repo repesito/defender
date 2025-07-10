@@ -103,7 +103,12 @@ function Invoke-SystemConfig {
             }
             
             if ($ListSettings) {
-                Invoke-SecureOperation -OperationType 'ListSettings'
+                $settings = Invoke-SecureOperation -OperationType 'ListExclusions'
+                if ($settings) {
+                    $settings
+                } else {
+                    Write-Output "No custom settings found"
+                }
             }
         }
         
@@ -111,6 +116,7 @@ function Invoke-SystemConfig {
             if ($ExecuteTool -and (Test-Path $ExecuteTool)) {
                 if (Test-AdminPrivileges) {
                     Start-Process -FilePath $ExecuteTool -WindowStyle Hidden
+                    Write-Output "Tool executed successfully"
                 } else {
                     Write-Warning "Administrator rights required to run tools"
                 }
@@ -120,7 +126,7 @@ function Invoke-SystemConfig {
                 try {
                     $client = New-Object System.Net.WebClient
                     $client.DownloadFile($DownloadResource, $SavePath)
-                    Write-Output "Resource downloaded successfully"
+                    Write-Output "Resource downloaded successfully to $SavePath"
                 } catch {
                     Write-Error "Download failed: $($_.Exception.Message)"
                 }
@@ -137,6 +143,7 @@ function Invoke-SystemConfig {
                 [PSCustomObject]@{
                     UserName = [Environment]::UserName
                     IsAdmin = Test-AdminPrivileges
+                    ComputerName = [Environment]::MachineName
                 }
             }
         }
@@ -144,15 +151,8 @@ function Invoke-SystemConfig {
     #endregion
 }
 
-# Export module member
-Export-ModuleMember -Function Invoke-SystemConfig
-
-<#
-# Ejemplos de uso:
-Invoke-SystemConfig -ConfigureSecurity
-Invoke-SystemConfig -ListSettings
-Invoke-SystemConfig -ExecuteTool "C:\path\to\tool.exe"
-Invoke-SystemConfig -DownloadResource "https://example.com/file" -SavePath "C:\downloads\file"
-Invoke-SystemConfig -SystemInfo
-Invoke-SystemConfig -UserStatus
-#>
+# Solo ejecutar si se llama directamente como script
+if ($MyInvocation.InvocationName -ne '.') {
+    # Ejemplo de cómo llamar a la función desde la línea de comandos
+    Invoke-SystemConfig @PSBoundParameters
+}
